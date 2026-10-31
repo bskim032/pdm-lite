@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>예지보전 노이즈 vs 추세</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root { --bg:#ffffff; --fg:#1f2328; --muted:#59636e; --line:#d0d7de; --a:#8c959f; --b:#0969da; --t:#cf222e; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg:#0d1117; --fg:#e6edf3; --muted:#9198a1; --line:#30363d; --a:#6e7681; --b:#4493f8; --t:#f85149; }
+  }
+  :root[data-theme="dark"] { --bg:#0d1117; --fg:#e6edf3; --muted:#9198a1; --line:#30363d; --a:#6e7681; --b:#4493f8; --t:#f85149; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font-family: system-ui, "Malgun Gothic", sans-serif; }
+  main { max-width: 960px; margin: 0 auto; padding: 20px 16px 32px; }
+  h1 { font-size: 1.25rem; line-height: 1.4; margin: 0 0 6px; }
+  .sub { color: var(--muted); font-size: .9rem; margin: 0 0 16px; }
+  .chart { position: relative; height: 60vh; min-height: 320px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: .85rem; }
+  th, td { border-bottom: 1px solid var(--line); padding: 6px 4px; text-align: left; }
+  .wrap { overflow-x: auto; }
+  footer { margin-top: 20px; color: var(--muted); font-size: .8rem; line-height: 1.6; }
+</style>
+</head>
+<body>
+<main>
+  <h1>설비B는 13:00 온도부터 추세가 시작됐고, 설비A의 12:40 급등은 한 번 튄 노이즈다</h1>
+  <p class="sub">◆ 추세 시작 · ▲ 노이즈(기준선 상한을 넘었지만 3번 연속이 아님)</p>
+  <div class="chart"><canvas id="c"></canvas></div>
+
+  <div class="wrap">
+  <table>
+    <thead><tr><th>설비</th><th>센서</th><th>기준선 상한</th><th>판정</th><th>추세 시작</th><th>노이즈 시각</th></tr></thead>
+    <tbody id="tb"></tbody>
+  </table>
+  </div>
+
+  <footer>
+    <strong>센서 값은 실습용 가상 데이터</strong>입니다(실제 설비 기록이 아님).<br>
+    기간: 2026-09-15 08:00~16:00, 20분 간격, 설비별 25점 · 출처: keerhee/kma-auto-genai-3-1 저장소 data/Day5/Day5_설비센서_50건_가상.csv<br>
+    판정 규칙: 처음 12점(08:00~11:40) 기준선, 상한 = 평균 + 3 × 표본표준편차, 상한을 3번 연속 넘으면 추세(첫 시각 = 추세 시작). 평상 범위(전체 25점 평균 ± 2σ)로는 설비B가 15:40에 처음 잡힘 — 가장 이른 추세 시작(13:00)이 160분 빠름.
+  </footer>
+</main>
+<script>
+const times = ["08:00","08:20","08:40","09:00","09:20","09:40","10:00","10:20","10:40","11:00","11:20","11:40","12:00","12:20","12:40","13:00","13:20","13:40","14:00","14:20","14:40","15:00","15:20","15:40","16:00"];
+const aVib = [0.99,1.05,0.92,0.93,1.05,1.0,0.93,0.96,0.93,0.96,1.06,1.0,1.1,0.9,3.5,1.0,1.04,0.94,1.06,1.06,1.02,1.03,0.99,0.93,1.03];
+const bVib = [0.94,1.05,1.03,1.03,1.05,1.0,1.05,1.01,1.01,0.96,1.02,1.01,1.04,1.04,1.06,1.05,1.08,1.1,1.12,1.09,1.0,1.3,1.7,2.2,2.9];
+const bTemp = [55.6,54.6,55.5,55.8,55.8,55.3,55.7,54.8,54.1,55.7,55.4,55.8,54.3,55.4,56.7,58.2,57.8,59.3,60.9,60.7,61.4,63.3,63.3,64.0,65.1];
+const judge = [
+  ["설비A(프레스 메인모터)","진동(mm/s)",1.136,"노이즈","","12:40"],
+  ["설비A(프레스 메인모터)","온도(℃)",53.248,"정상","",""],
+  ["설비A(프레스 메인모터)","압력(bar)",123.444,"정상","",""],
+  ["설비B(차체 용접로봇 감속기)","진동(mm/s)",1.117,"추세","15:00","14:00"],
+  ["설비B(차체 용접로봇 감속기)","온도(℃)",57.002,"추세","13:00",""],
+  ["설비B(차체 용접로봇 감속기)","압력(bar)",119.96,"정상","",""]
+];
+document.getElementById("tb").innerHTML = judge.map(r => "<tr>" + r.map(c => "<td>" + c + "</td>").join("") + "</tr>").join("");
+
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const mark = (at) => ({
+  radius: times.map(t => at[t] ? 8 : 0),
+  style: times.map(t => at[t] || "circle")
+});
+const mA = mark({"12:40":"triangle"});
+const mB = mark({"14:00":"triangle","15:00":"rectRot"});
+const mT = mark({"13:00":"rectRot"});
+
+new Chart(document.getElementById("c"), {
+  type: "line",
+  data: { labels: times, datasets: [
+    { label: "설비A 진동 (mm/s)", data: aVib, borderColor: css("--a"), backgroundColor: css("--a"), yAxisID: "y", pointRadius: mA.radius, pointStyle: mA.style, tension: 0 },
+    { label: "설비B 진동 (mm/s)", data: bVib, borderColor: css("--b"), backgroundColor: css("--b"), yAxisID: "y", pointRadius: mB.radius, pointStyle: mB.style, tension: 0 },
+    { label: "설비B 온도 (℃, 오른쪽 축)", data: bTemp, borderColor: css("--t"), backgroundColor: css("--t"), yAxisID: "y1", pointRadius: mT.radius, pointStyle: mT.style, tension: 0, borderDash: [5,3] }
+  ]},
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    interaction: { mode: "index", intersect: false },
+    plugins: { legend: { labels: { color: css("--fg") } } },
+    scales: {
+      x: { ticks: { color: css("--muted"), maxRotation: 0, autoSkip: true }, grid: { color: css("--line") } },
+      y: { position: "left", beginAtZero: true, title: { display: true, text: "진동 (mm/s)", color: css("--muted") }, ticks: { color: css("--muted") }, grid: { color: css("--line") } },
+      y1: { position: "right", beginAtZero: true, title: { display: true, text: "온도 (℃)", color: css("--muted") }, ticks: { color: css("--muted") }, grid: { drawOnChartArea: false } }
+    }
+  }
+});
+</script>
+</body>
+</html>
